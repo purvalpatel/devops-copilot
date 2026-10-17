@@ -1,7 +1,10 @@
-"""LLM investigation loop (Claude tool use) with a rule-based fallback."""
+"""LLM investigation loop for any OpenAI-compatible endpoint (vLLM, TGI, NIM, ...)."""
 from __future__ import annotations
+import json
 import os
-from .config import Config
+import re
+import requests
+from .config import Config, LLMCfg
 from .detector import Anomaly
 from .tools import TOOL_SPECS, ToolRunner
 
@@ -20,14 +23,52 @@ Rules:
   NEXT STEPS: bullets for humans
 """
 
+# OpenAI "function" format, generated from the shared tool specs
+OPENAI_TOOLS = [{"type": "function",
+                 "function": {"name": t["name"], "description": t["description"],
+                              "parameters": t["input_schema"]}} for t in TOOL_SPECS]
+
+
+class LLMError(Exception):
+    def __init__(self, msg: str, status: int | None = None):
+        super().__init__(msg)
+        self.status = status
+
+
+class LLMClient:
+    def __init__(self, cfg: LLMCfg):
+        self.cfg = cfg
+        self.url = cfg.base_url.rstrip("/") + "/chat/completions"
+        self.headers = {"Content-Type": "application/json"}
+        key = os.getenv(cfg.api_key_env, "")
+        if key:
+            self.headers["Authorization"] = f"Bearer {key}"
+
+    def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
+        body = {"model": self.cfg.model, "messages": messages,
+                "max_tokens": self.cfg.max_tokens, "temperature": self.cfg.temperature}
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+        try:
+            r = requests.post(self.url, headers=self.headers, json=body,
+                              timeout=self.cfg.timeout_seconds)
+        except requests.RequestException as e:
+            raise LLMError(f"cannot reach LLM at {self.url}: {e}") from e
+        if r.status_code >= 400:
+            raise LLMError(f"HTTP {r.status_code}: {r.text[:300]}", r.status_code)
+        return r.json()["choices"][0]["message"]
+
+
+def clean(text: str | None) -> str:
+    """Drop reasoning blocks some models emit."""
+    return re.sub(r"<think>.*?</think>", "", text or "", flags=re.S).strip()
+
 
 class Agent:
     def __init__(self, cfg: Config, tools: ToolRunner):
         self.cfg, self.tools = cfg, tools
-        self.client = None
-        if os.getenv("ANTHROPIC_API_KEY"):
-            import anthropic
-            self.client = anthropic.Anthropic()
+        self.llm = LLMClient(cfg.llm)
 
     def investigate(self, anomalies: list[Anomaly], snapshot: dict) -> str:
         brief = ("Detected anomalies:\n" + "\n".join(f"- {a}" for a in anomalies)
@@ -38,24 +79,58 @@ class Agent:
         return self._run(question)
 
     def _run(self, user_msg: str) -> str:
-        if not self.client:
-            return self._fallback(user_msg)
-        messages = [{"role": "user", "content": user_msg}]
-        for _ in range(self.cfg.max_agent_steps):
-            resp = self.client.messages.create(
-                model=self.cfg.model, max_tokens=2000, system=SYSTEM,
-                tools=TOOL_SPECS, messages=messages)
-            if resp.stop_reason != "tool_use":
-                return "".join(b.text for b in resp.content if b.type == "text")
-            messages.append({"role": "assistant", "content": resp.content})
-            results = [{"type": "tool_result", "tool_use_id": b.id,
-                        "content": self.tools.run(b.name, b.input)}
-                       for b in resp.content if b.type == "tool_use"]
-            messages.append({"role": "user", "content": results})
-        return "Investigation stopped: step limit reached. Partial evidence gathered; escalate to a human."
+        try:
+            if self.cfg.llm.tool_calling:
+                try:
+                    return self._run_with_tools(user_msg)
+                except LLMError as e:
+                    # server not started with tool-calling support -> degrade gracefully
+                    if e.status in (400, 404, 422) and "tool" in str(e).lower():
+                        print("(server rejected tool calling; using evidence mode)")
+                    else:
+                        raise
+            return self._run_with_evidence(user_msg)
+        except LLMError as e:
+            return self._fallback(user_msg, str(e))
 
-    def _fallback(self, brief: str) -> str:
-        """No API key: gather basic evidence deterministically."""
+    # -- mode 1: native function calling -------------------------------------
+    def _run_with_tools(self, user_msg: str) -> str:
+        messages = [{"role": "system", "content": SYSTEM},
+                    {"role": "user", "content": user_msg}]
+        for _ in range(self.cfg.max_agent_steps):
+            msg = self.llm.chat(messages, OPENAI_TOOLS)
+            calls = msg.get("tool_calls") or []
+            if not calls:
+                return clean(msg.get("content"))
+            messages.append({"role": "assistant", "content": msg.get("content") or "",
+                             "tool_calls": calls})
+            for call in calls:
+                fn = call["function"]
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                messages.append({"role": "tool", "tool_call_id": call["id"],
+                                 "content": self.tools.run(fn["name"], args)})
+        return "Investigation stopped: step limit reached. Escalate to a human."
+
+    # -- mode 2: no function calling; we collect evidence, model analyses ----
+    def _run_with_evidence(self, user_msg: str) -> str:
+        parts = [("system metrics", self.tools.run("get_system_metrics", {})),
+                 ("top processes (cpu)", self.tools.run("top_processes", {"n": 5})),
+                 ("top processes (memory)", self.tools.run("top_processes", {"n": 5, "by": "memory"})),
+                 ("docker ps", self.tools.run("docker_ps", {}))]
+        for path in sorted(self.tools.log_paths):
+            parts.append((f"errors in {path}",
+                          self.tools.run("search_logs", {"path": path,
+                                                         "pattern": "error|exception|fatal|oom|panic"})))
+        evidence = "\n\n".join(f"## {k}\n{v}" for k, v in parts)
+        msg = self.llm.chat([
+            {"role": "system", "content": SYSTEM + "\nNo tools are available; "
+             "base your report only on the evidence provided."},
+            {"role": "user", "content": f"{user_msg}\n\nEVIDENCE:\n{evidence}"}])
+        return clean(msg.get("content"))
+
+    def _fallback(self, brief: str, err: str) -> str:
         procs = self.tools.run("top_processes", {"n": 5})
-        return ("SEVERITY: unknown (LLM disabled - set ANTHROPIC_API_KEY)\n"
-                f"{brief}\n\nTop processes:\n{procs}")
+        return (f"SEVERITY: unknown (LLM unavailable: {err})\n{brief}\n\nTop processes:\n{procs}")

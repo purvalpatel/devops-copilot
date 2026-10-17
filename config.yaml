@@ -1,6 +1,14 @@
 # AIOps agent configuration
 interval_seconds: 15          # metric collection interval
-model: claude-sonnet-5-5      # override with AIOPS_MODEL
+
+llm:                          # any OpenAI-compatible server
+  base_url: http://10.120.130.68:8000/v1
+  model: nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B
+  api_key_env: LLM_API_KEY    # export LLM_API_KEY=...  (never put the key in this file)
+  temperature: 0.2
+  max_tokens: 2000
+  timeout_seconds: 120
+  tool_calling: true          # set false if your server lacks function-calling support
 max_agent_steps: 8            # tool-call rounds per investigation
 incident_cooldown_seconds: 300
 
