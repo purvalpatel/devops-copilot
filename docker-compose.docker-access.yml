@@ -1,9 +1,0 @@
-# OPTIONAL: lets the agent run `docker ps/logs` and restart allow-listed containers.
-# WARNING: access to docker.sock is root-equivalent on the host. Enable deliberately.
-#   docker compose -f docker-compose.yml -f docker-compose.docker-access.yml up -d
-services:
-  aiops-agent:
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    group_add:
-      - "${DOCKER_GID:-999}"         # find yours: getent group docker | cut -d: -f3
