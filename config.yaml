@@ -1,0 +1,29 @@
+# AIOps agent configuration
+interval_seconds: 15          # metric collection interval
+model: claude-sonnet-5-5      # override with AIOPS_MODEL
+max_agent_steps: 8            # tool-call rounds per investigation
+incident_cooldown_seconds: 300
+
+detector:
+  warmup_samples: 20          # samples before z-score alerts activate
+  z_threshold: 3.5
+  consecutive_breaches: 2     # sustained anomaly required
+  static_limits:              # hard limits (percent)
+    cpu_percent: 90
+    mem_percent: 90
+    disk_percent: 90
+
+log_paths:                    # the ONLY files the agent may read
+  - /var/log/syslog
+  - /var/log/nginx/error.log
+  - /var/log/app/app.log
+
+remediation:
+  dry_run: true               # set false to really execute
+  require_approval: true      # prompt a human in the terminal
+  cooldown_seconds: 600       # per-action/target
+  allowed_services: [nginx, myapp]
+  allowed_containers: [web, api, worker]
+
+notifier:
+  slack_webhook_env: SLACK_WEBHOOK_URL   # optional env var name
