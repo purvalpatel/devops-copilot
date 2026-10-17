@@ -1,0 +1,33 @@
+# Linux hosts. Start:  docker compose up -d --build
+services:
+  aiops-agent:
+    build: .
+    image: aiops-agent:latest
+    container_name: aiops-agent
+    restart: unless-stopped          # restarts on crash, Docker daemon restart and host reboot
+    init: true                       # proper signal handling / zombie reaping
+    pid: host                        # lets the agent see host processes
+    env_file: .env                   # cp deploy/aiops-agent.env.example .env
+    environment:
+      AIOPS_DISK_PATH: /hostfs-probe # report the HOST disk usage, not the container overlay
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - /var/log:/var/log:ro
+      - /etc/hostname:/hostfs-probe:ro   # a file on the host's root filesystem (statvfs probe)
+      - aiops-data:/data
+    group_add:
+      - "${LOG_GID:-4}"              # group that can read /var/log (adm = 4 on Debian/Ubuntu)
+    # --- hardening ---
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    cpus: 0.5
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+volumes:
+  aiops-data:

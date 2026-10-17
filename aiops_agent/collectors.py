@@ -1,5 +1,6 @@
 """Read-only telemetry collectors."""
 from __future__ import annotations
+import os
 import shutil
 import subprocess
 import time
@@ -7,12 +8,13 @@ import psutil
 
 
 def collect_system() -> dict:
+    disk_path = os.getenv("AIOPS_DISK_PATH", "/")   # in Docker: a file on the host filesystem
     load1 = psutil.getloadavg()[0] if hasattr(psutil, "getloadavg") else 0.0
     return {
         "ts": time.time(),
         "cpu_percent": psutil.cpu_percent(interval=0.5),
         "mem_percent": psutil.virtual_memory().percent,
-        "disk_percent": psutil.disk_usage("/").percent,
+        "disk_percent": psutil.disk_usage(disk_path).percent,
         "load1": round(load1, 2),
         "cpu_count": psutil.cpu_count(),
     }

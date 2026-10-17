@@ -33,5 +33,14 @@ remediation:
   allowed_services: [nginx, myapp]
   allowed_containers: [web, api, worker]
 
+data_dir: ./data              # incident history (incidents.jsonl); AIOPS_DATA_DIR overrides
+resolve_after_clear_cycles: 4 # send "resolved" after N clean cycles
+
+# Channels turn on automatically when their env vars are set (see deploy/aiops-agent.env.example)
 notifier:
-  slack_webhook_env: SLACK_WEBHOOK_URL   # optional env var name
+  notify_on_start: true
+  smtp_host: ""               # e.g. smtp.gmail.com  (enables email)
+  smtp_port: 587
+  email_from: aiops@example.com
+  email_to: []                # e.g. [oncall@example.com]
+  heartbeat_interval_seconds: 60
