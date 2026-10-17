@@ -8,6 +8,14 @@ collectors ─► detector (EWMA z-score + limits) ─► agent (Claude + tools)
                                                         └─► remediation engine (allowlist, cooldown, approval, dry-run)
 ```
 
+### Safety
+
+- The model has no shell access, and commands run without a shell.
+- Log files are readable only from the paths you list in config.yaml.
+- Restarts of services or containers need an allowlisted target, a cooldown, and terminal approval.
+- Remediation is dry-run by default, so nothing executes until you set remediation.dry_run: false.
+- Without ANTHROPIC_API_KEY it falls back to a deterministic report instead of crashing.
+
 ## Run
     pip install -r requirements.txt
     export ANTHROPIC_API_KEY=sk-ant-...
