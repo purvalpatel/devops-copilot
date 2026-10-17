@@ -8,20 +8,6 @@ collectors ─► detector (EWMA z-score + limits) ─► agent (LLM + tools) �
                                                         └─► remediation engine (allowlist, cooldown, approval, dry-run)
 ```
 
-### components:
-| Components | File | What is does |
-| -----------| ---- | ------------ |
-| Collectors | Collectors.py | Collect CPU, Memory, load and disk. |
-| Detector | detector.py | Combines a rolling baseline with hardlimits. | 
-| Agent core | Agent.py | is the loop that talks to the LLM. | 
-| Safe tools | tools.py | ToolRunner exposes 7 tools. Logs can only be read from paths listed in  config.yaml | 
-| Policy gate | remediation.py | it asks for the approval and runs in dry-run by default.| 
-| Notifier | notifier.py | sends to slack or telegram. | 
-| Orchestrator | main.py | ties everything together and handles shutdown signals. | 
-| Settings | config.py, config.yaml | All threashold, allowlist and the LLM endpoint | 
-| Always-on | deploy/ | The systemd unit, install script, Dockerfile and compose file. | 
-
-
 ## Run
     pip install -r requirements.txt
     export LLM_API_KEY=...   # bearer token for your LLM server

@@ -1,0 +1,46 @@
+# AIOps agent configuration
+interval_seconds: 15          # metric collection interval
+
+llm:                          # any OpenAI-compatible server
+  base_url: http://10.120.130.68:8000/v1
+  model: nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B
+  api_key_env: LLM_API_KEY    # export LLM_API_KEY=...  (never put the key in this file)
+  temperature: 0.2
+  max_tokens: 2000
+  timeout_seconds: 120
+  tool_calling: true          # set false if your server lacks function-calling support
+max_agent_steps: 8            # tool-call rounds per investigation
+incident_cooldown_seconds: 300
+
+detector:
+  warmup_samples: 20          # samples before z-score alerts activate
+  z_threshold: 3.5
+  consecutive_breaches: 2     # sustained anomaly required
+  static_limits:              # hard limits (percent)
+    cpu_percent: 90
+    mem_percent: 90
+    disk_percent: 90
+
+log_paths:                    # the ONLY files the agent may read
+  - /var/log/syslog
+  - /var/log/nginx/error.log
+  - /var/log/app/app.log
+
+remediation:
+  dry_run: true               # set false to really execute
+  require_approval: true      # prompt a human in the terminal
+  cooldown_seconds: 600       # per-action/target
+  allowed_services: [nginx, myapp]
+  allowed_containers: [web, api, worker]
+
+data_dir: ./data              # incident history (incidents.jsonl); AIOPS_DATA_DIR overrides
+resolve_after_clear_cycles: 4 # send "resolved" after N clean cycles
+
+# Channels turn on automatically when their env vars are set (see deploy/aiops-agent.env.example)
+notifier:
+  notify_on_start: true
+  smtp_host: ""               # e.g. smtp.gmail.com  (enables email)
+  smtp_port: 587
+  email_from: aiops@example.com
+  email_to: []                # e.g. [oncall@example.com]
+  heartbeat_interval_seconds: 60
