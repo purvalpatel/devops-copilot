@@ -16,8 +16,10 @@ def test_channels_retry_and_isolation(monkeypatch):
     class R:
         def raise_for_status(self): pass
 
+    payloads = []
+
     def fake_post(url, json=None, timeout=None):
-        calls.append(url)
+        calls.append(url); payloads.append(json)
         if "slack" in url and calls.count(url) == 1:
             raise RuntimeError("transient")      # first slack attempt fails -> retried
         return R()
@@ -25,6 +27,8 @@ def test_channels_retry_and_isolation(monkeypatch):
     Notifier(NotifierCfg()).send("t", "b", "critical")
     assert calls.count("http://slack.test/x") == 2
     assert any("api.telegram.org/botTOK" in u for u in calls)
+    att = next(p for u, p in zip(calls, payloads) if "slack" in u)["attachments"][0]
+    assert att["color"] == "#D00000" and "[" in att["title"] and "```" in att["text"]
 
 
 def test_email_channel(monkeypatch):

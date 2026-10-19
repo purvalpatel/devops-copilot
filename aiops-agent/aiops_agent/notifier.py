@@ -13,6 +13,7 @@ from .config import NotifierCfg
 
 log = logging.getLogger("aiops.notify")
 ICON = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨", "resolved": "✅"}
+SLACK_COLOR = {"info": "#439FE0", "warning": "#F2C744", "critical": "#D00000", "resolved": "#2EB67D"}
 
 
 class Notifier:
@@ -31,7 +32,7 @@ class Notifier:
     def _channels(self, header, text, title, body, level):
         c = self.cfg
         if url := os.getenv(c.slack_webhook_env, ""):
-            yield "slack", lambda: self._post(url, {"text": f"*{header}*\n```{body[:2800]}```"})
+            yield "slack", lambda: self._post(url, self._slack_payload(header, body, level))
         if url := os.getenv(c.webhook_url_env, ""):
             yield "webhook", lambda: self._post(url, {
                 "title": title, "body": body, "level": level,
@@ -43,6 +44,18 @@ class Notifier:
                 {"chat_id": chat, "text": text[:4000]})
         if c.smtp_host and c.email_to:
             yield "email", lambda: self._email(header, text)
+
+    @staticmethod
+    def _slack_payload(header: str, body: str, level: str) -> dict:
+        """Color-coded attachment: red=critical, yellow=warning, green=resolved, blue=info."""
+        return {"attachments": [{
+            "color": SLACK_COLOR.get(level, "#439FE0"),
+            "fallback": header,                       # shown in push notifications
+            "title": header,
+            "text": f"```{body[:2800]}```",
+            "mrkdwn_in": ["text"],
+            "ts": int(time.time()),
+        }]}
 
     @staticmethod
     def _post(url: str, payload: dict) -> None:
